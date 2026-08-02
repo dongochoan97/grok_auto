@@ -1,0 +1,58 @@
+name: GitLab Runner macOS
+
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        description: Dispatch source guard
+        required: true
+        type: string
+      release_tag:
+        description: GitLab release tag
+        required: false
+        type: string
+      pipeline_id:
+        description: GitLab pipeline ID
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+run-name: "GitLab Runner macOS ${{ github.event.inputs.release_tag || 'manual' }} #${{ github.event.inputs.pipeline_id || 'manual' }}"
+
+concurrency:
+  group: gitlab-runner-macos
+  cancel-in-progress: true
+
+jobs:
+  runner-macos:
+    if: ${{ github.event.inputs.source == 'gitlab-release' && github.event.inputs.pipeline_id != '' }}
+    runs-on: macos-15
+    timeout-minutes: 25
+    env:
+      GITLAB_URL: ${{ vars.GITLAB_URL }}
+      GITLAB_RUNNER_TOKEN: ${{ secrets.GITLAB_RUNNER_TOKEN_MACOS }}
+      LOG_LEVEL: warn
+      RUNNER_CONFIG: /tmp/gitlab-runner-macos/config.toml
+      RUNNER_WORKDIR: /tmp/gitlab-runner-macos/work
+
+    steps:
+      - name: Install GitLab Runner
+        run: |
+          set -euo pipefail
+          sudo curl -fsSL https://gitlab-runner-downloads.s3.amazonaws.com/latest/binaries/gitlab-runner-darwin-arm64 -o /usr/local/bin/gitlab-runner
+          sudo chmod +x /usr/local/bin/gitlab-runner
+          gitlab-runner --version
+
+      - name: Register and run one GitLab job
+        run: |
+          set -euo pipefail
+          if [ -z "${GITLAB_URL}" ]; then echo "::error::Missing variable GITLAB_URL"; exit 1; fi
+          if [ -z "${GITLAB_RUNNER_TOKEN}" ]; then echo "::error::Missing secret GITLAB_RUNNER_TOKEN_MACOS"; exit 1; fi
+          runner_name="gh-macos-${GITHUB_RUN_ID}"
+          mkdir -p "$(dirname "$RUNNER_CONFIG")" "$RUNNER_WORKDIR"
+          gitlab-runner --log-level error register --config "$RUNNER_CONFIG" --non-interactive --url "$GITLAB_URL" --token "$GITLAB_RUNNER_TOKEN" --name "$runner_name" --executor shell
+          cleanup() { gitlab-runner --log-level error unregister --config "$RUNNER_CONFIG" --name "$runner_name" || true; }
+          trap cleanup EXIT INT TERM
+          gitlab-runner --log-level error run-single --config "$RUNNER_CONFIG" -r "$runner_name" --max-builds 1 --wait-timeout 120
