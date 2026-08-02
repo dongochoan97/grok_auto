@@ -55,4 +55,7 @@ jobs:
           gitlab-runner --log-level error register --config "$RUNNER_CONFIG" --non-interactive --url "$GITLAB_URL" --token "$GITLAB_RUNNER_TOKEN" --name "$runner_name" --executor shell
           cleanup() { gitlab-runner --log-level error unregister --config "$RUNNER_CONFIG" --name "$runner_name" || true; }
           trap cleanup EXIT INT TERM
-          gitlab-runner --log-level error run-single --config "$RUNNER_CONFIG" -r "$runner_name" --max-builds 1 --wait-timeout 120
+          if ! gitlab-runner --log-level error run-single --config "$RUNNER_CONFIG" -r "$runner_name" --max-builds 1 --wait-timeout 120 > "$RUNNER_WORKDIR/job.log" 2>&1; then
+            echo "::error::GitLab release job failed; inspect its GitLab trace."
+            exit 1
+          fi

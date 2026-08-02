@@ -36,56 +36,17 @@ jobs:
       LOG_LEVEL: warn
       RUNNER_DIR: C:\gitlab-runner
       RUNNER_CONFIG: C:\gitlab-runner\config.toml
-      GROKAUTO_CACHE_DIR: ${{ github.workspace }}\.grokauto-cache
-      PNPM_STORE_DIR: ${{ github.workspace }}\.grokauto-cache\pnpm-store
-      CARGO_HOME: ${{ github.workspace }}\.grokauto-cache\cargo-home
-      CARGO_TARGET_DIR: ${{ github.workspace }}\.grokauto-cache\cargo-target
-      ELECTRON_CACHE: ${{ github.workspace }}\.grokauto-cache\electron
-      ELECTRON_BUILDER_CACHE: ${{ github.workspace }}\.grokauto-cache\electron-builder
 
     steps:
-      - name: Setup Node.js
-        uses: actions/setup-node@v6.4.0
-        with:
-          node-version: 24
-
-      - name: Restore build caches
-        uses: actions/cache@v5.0.5
-        with:
-          path: |
-            ${{ github.workspace }}\.grokauto-cache\pnpm-store
-            ${{ github.workspace }}\.grokauto-cache\cargo-home\registry
-            ${{ github.workspace }}\.grokauto-cache\cargo-home\git
-            ${{ github.workspace }}\.grokauto-cache\cargo-target
-            ${{ github.workspace }}\.grokauto-cache\electron
-            ${{ github.workspace }}\.grokauto-cache\electron-builder
-            ${{ github.workspace }}\.grokauto-cache\gitlab-runner\gitlab-runner.exe
-          key: grokauto-windows-release-v5
-
       - name: Prepare runner
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          foreach ($dir in @(
-            $env:GROKAUTO_CACHE_DIR,
-            $env:PNPM_STORE_DIR,
-            $env:CARGO_HOME,
-            $env:CARGO_TARGET_DIR,
-            $env:ELECTRON_CACHE,
-            $env:ELECTRON_BUILDER_CACHE
-          )) {
-            New-Item -ItemType Directory -Force $dir | Out-Null
-          }
-          $cachedRunner = Join-Path $env:GROKAUTO_CACHE_DIR 'gitlab-runner\gitlab-runner.exe'
-          New-Item -ItemType Directory -Force (Split-Path -Parent $cachedRunner) | Out-Null
-          if (-not (Test-Path -LiteralPath $cachedRunner)) {
-            & curl.exe -fL --retry 4 --retry-delay 3 --connect-timeout 20 `
-              'https://gitlab-runner-downloads.s3.amazonaws.com/latest/binaries/gitlab-runner-windows-amd64.exe' `
-              -o $cachedRunner
-            if ($LASTEXITCODE -ne 0) { throw "Failed to download GitLab Runner with exit code $LASTEXITCODE" }
-          }
           New-Item -ItemType Directory -Force $env:RUNNER_DIR | Out-Null
-          Copy-Item -LiteralPath $cachedRunner -Destination "$env:RUNNER_DIR\gitlab-runner.exe" -Force
+          & curl.exe -fL --retry 4 --retry-delay 3 --connect-timeout 20 `
+            'https://gitlab-runner-downloads.s3.amazonaws.com/latest/binaries/gitlab-runner-windows-amd64.exe' `
+            -o "$env:RUNNER_DIR\gitlab-runner.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Failed to download GitLab Runner with exit code $LASTEXITCODE" }
 
       - name: Register and run one GitLab job
         shell: powershell
@@ -98,8 +59,8 @@ jobs:
           & $runner --log-level error register --config $env:RUNNER_CONFIG --non-interactive --url $env:GITLAB_URL --token $env:GITLAB_RUNNER_TOKEN --name $runnerName --executor shell --shell powershell
           if ($LASTEXITCODE -ne 0) { throw "GitLab Runner registration failed with exit code $LASTEXITCODE" }
           try {
-            & $runner --log-level error run-single --config $env:RUNNER_CONFIG -r $runnerName --max-builds 1 --wait-timeout 120
+            & $runner --log-level error run-single --config $env:RUNNER_CONFIG -r $runnerName --max-builds 1 --wait-timeout 120 *> "$env:RUNNER_DIR\job.log"
             if ($LASTEXITCODE -ne 0) { throw "GitLab Runner exited with code $LASTEXITCODE" }
           } finally {
-            & $runner --log-level error unregister --config $env:RUNNER_CONFIG --name $runnerName
+            & $runner --log-level error unregister --config $env:RUNNER_CONFIG --name $runnerName *> $null
           }
